@@ -328,7 +328,7 @@ if not st.session_state.logged_in:
                 st.error(msg)
     st.markdown("---")
     st.info("For Demo Please Fill this G form")
-    st.info("43b(h) tool by clicking the below link"))
+    st.info("43b(h) tool by clicking the below link")
     phone = "918248979741"  # Your WhatsApp number in international format
     message = "43b h tool demo"          # Or your desired message
     url = f"https://wa.me/{phone}?text={quote(message)}"
