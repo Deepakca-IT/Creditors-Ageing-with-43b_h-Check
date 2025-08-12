@@ -6,7 +6,7 @@ from datetime import datetime
 from io import BytesIO
 from collections import deque
 
-st.set_page_config(page_title="Aging + 43B Tool (with MSME)", layout="wide")
+st.set_page_config(page_title="Ag + 43B Tool (with MSME)", layout="wide")
 
 # -------------------------
 # Authentication
