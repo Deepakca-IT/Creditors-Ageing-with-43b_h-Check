@@ -337,8 +337,7 @@ else:
 
     # Step 1: Upload ledger
     st.header("Step 1 — Upload Creditor Ledger")
-    st.markdown("Upload your ledger extract from the tally by following steps: 
-    From Gateway of Tally : Alt+P → Others → Group of Accounts → Sundry Creditors → Alt+E → Configure → Period: 15/02/202X → 15/05/202X → Excel")
+    st.markdown("*Upload your ledger extract from the tally by following steps:* From Gateway of Tally : Alt+P → Others → Group of Accounts → Sundry Creditors → Alt+E → Configure → Period: 15/02/202X → 15/05/202X → Excel")
     uploaded_file = st.file_uploader("Upload Ledger Excel (xlsx/xls)", type=["xlsx", "xls"])
 
     parsed_data = None
