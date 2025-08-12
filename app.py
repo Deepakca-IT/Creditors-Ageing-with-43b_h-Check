@@ -326,14 +326,18 @@ if not st.session_state.logged_in:
             else:
                 st.error(msg)
     st.markdown("---")
-    st.info("Tip: upload users.json or use Streamlit Secrets for production credentials.")
+    st.info("For Demo Please Fill this G form")
+    phone = "918248979741"  # Your WhatsApp number in international format
+    message = "hi"          # Or your desired message
+    url = f"https://wa.me/{phone}?text={quote(message)}"
+    st.markdown(f"[Open WhatsApp chat]({url})")
 else:
     st.sidebar.write(f"Logged in as: **{st.session_state.user}**")
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.rerun()
 
-    st.title("📊 Creditor Aging & 43B(h) — MSME Enhanced")
+    st.title("📊 Creditor Aging & 43B(h) — MSME Check")
 
     # Step 1: Upload ledger
     st.header("Step 1 — Upload Creditor Ledger")
