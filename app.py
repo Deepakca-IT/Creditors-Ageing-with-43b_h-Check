@@ -337,7 +337,7 @@ else:
 
     # Step 1: Upload ledger
     st.header("Step 1 — Upload Creditor Ledger")
-    st.markdown("Upload your ledger extract (same layout as before: rows with 'Ledger:' in col A indicate party start; transaction rows have date in col A, debit in col F, credit in col G).")
+    st.markdown("Upload your ledger extract from the tally by following steps Alt+P → Others → Group of Accounts → Sundry Creditors → Alt+E → Configure → Period: 15/02/202X → 15/05/202X → Excel")
     uploaded_file = st.file_uploader("Upload Ledger Excel (xlsx/xls)", type=["xlsx", "xls"])
 
     parsed_data = None
