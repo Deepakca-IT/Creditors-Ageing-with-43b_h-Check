@@ -6,6 +6,7 @@ import bcrypt
 from datetime import datetime
 from io import BytesIO
 from collections import deque
+from urllib.parse import quote
 
 st.set_page_config(page_title="Aging + 43B Tool (with MSME)", layout="wide")
 
