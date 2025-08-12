@@ -338,10 +338,15 @@ else:
     # Step 1: Upload ledger
     st.header("Step 1 — Upload Creditor Ledger")
     st.markdown("""
-    **Upload your ledger extract from the tally by following steps:* *
-    -From Gateway of Tally : Alt+P → Others → Group of Accounts 
-    - → Sundry Creditors → Alt+E → Configure → Period: 15/02/202X → 15/05/202X → Excel
-    """)
+**Upload your ledger extract from Tally by following steps:**
+
+1. From **Gateway of Tally**: `Alt+P` → **Others**  
+2. Select **Group of Accounts**  
+3. Choose **Sundry Creditors**  
+4. Press `Alt+E` → **Configure**  
+5. Set **Period**: 15/02/202X → 15/05/202X  
+6. Export as **Excel**
+""")
     uploaded_file = st.file_uploader("Upload Ledger Excel (xlsx/xls)", type=["xlsx", "xls"])
 
     parsed_data = None
