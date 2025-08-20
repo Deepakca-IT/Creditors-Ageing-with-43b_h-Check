@@ -344,7 +344,7 @@ else:
 2. Select **Group of Accounts**  
 3. Choose **Sundry Creditors**  
 4. Press `Alt+E` → **Configure**  
-5. Set **Period**: 15/02/202X → 15/05/202X  
+5. Set **Period**: 13/02/2025 → 15/05/2025 for FY 2024-25  
 6. Export as **Excel**
 """)
     uploaded_file = st.file_uploader("Upload Ledger Excel (xlsx/xls)", type=["xlsx", "xls"])
