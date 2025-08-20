@@ -356,8 +356,8 @@ else:
             df_raw = pd.read_excel(uploaded_file, header=None)
             parsed_data = parse_ledger_df(df_raw)
             st.success("Ledger parsed successfully.")
-            st.subheader("Preview (first 10 rows)")
-            st.dataframe(parsed_data.head(10))
+            st.subheader("Preview (first 2 rows)")
+            st.dataframe(parsed_data.head(2))
             unique_parties = parsed_data['Party'].drop_duplicates().sort_values().tolist()
             st.info(f"Found {len(unique_parties)} unique suppliers/parties.")
         except Exception as e:
