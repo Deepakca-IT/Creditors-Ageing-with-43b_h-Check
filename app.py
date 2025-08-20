@@ -326,7 +326,7 @@ if not st.session_state.logged_in:
             else:
                 st.error(msg)
     st.markdown("---")
-    st.info("Tip: upload users.json or use Streamlit Secrets for production credentials.")
+    st.info("Contact ______ for Login details ")
 else:
     st.sidebar.write(f"Logged in as: **{st.session_state.user}**")
     if st.sidebar.button("Logout"):
