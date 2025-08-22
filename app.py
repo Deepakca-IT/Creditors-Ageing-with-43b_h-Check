@@ -438,7 +438,7 @@ If you don't know the MSME status of the supplier and want to leave it blank, it
     # Allow user to export the MSME mapping they edited
     if not st.session_state.msme_df.empty:
         out_msme_bytes = to_excel_bytes({"MSME Mapping": st.session_state.msme_df})
-        st.download_button("⬇ Download MSME mapping you edited (Excel)", data=out_msme_bytes, file_name="msme_mapping_used.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sh[...]
+        st.download_button("⬇ Download MSME mapping you edited (Excel)", data=out_msme_bytes, file_name="msme_mapping_used.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # Step 3: Run processing with MSME exemptions
     st.header("Step 3 — Run Aging & 43B(h) with MSME exemptions")
