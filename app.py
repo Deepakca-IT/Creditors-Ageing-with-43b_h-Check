@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import json
@@ -90,13 +91,195 @@ def parse_ledger_df(df_raw: pd.DataFrame) -> pd.DataFrame:
     return data
 
 def calculate_creditor_aging_and_43b(df: pd.DataFrame, cutoff_date: pd.Timestamp, msme_map: pd.DataFrame):
-    # ... unchanged code ...
-    # (This function is unchanged, same as before)
-    # ... unchanged code ...
-    # For brevity, not repeated here. Assume original logic.
+    """
+    msme_map: DataFrame with columns:
+      'Supplier Name','Registered (Yes/No)','Category (Micro/Small/Medium)','Business Type (Trader/Manufacturer/Service Provider)'
+    """
+    # Normalize msme_map for quick lookup
+    if msme_map is None or msme_map.empty:
+        msme_map = pd.DataFrame(columns=['Supplier Name','Registered (Yes/No)','Category','Business Type'])
+    msme_map = msme_map.rename(columns={
+        'Registered (Yes/No)': 'Registered',
+        'Category (Micro/Small/Medium)': 'Category',
+        'Business Type (Trader/Manufacturer/Service Provider)': 'Business Type'
+    }, errors='ignore')
+    msme_map['Supplier Name'] = msme_map['Supplier Name'].astype(str).str.strip()
 
+    def is_exempt(party_name):
+        """
+        Exemption rules (return (bool, reason_str)):
+         - If Registered == 'No' => exempt (reason: Non-registered)
+         - If Category == 'Medium' => exempt (reason: Medium category)
+         - If Business Type == 'Trader' => exempt (reason: Trader)
+        If party not found in msme_map, treat as unknown -> not exempt by MSME (user can edit)
+        """
+        row = msme_map[msme_map['Supplier Name'].str.lower() == str(party_name).strip().lower()]
+        if row.empty:
+            return False, ""  # unknown -> not exempt by MSME rules
+        r = row.iloc[0]
+        reg = str(r.get('Registered', '')).strip().lower()
+        cat = str(r.get('Category', '')).strip().lower()
+        btype = str(r.get('Business Type', '')).strip().lower()
+        if reg in ('no', 'n', 'false', '0', ''):
+            return True, "Exempt: Non-MSME registered"
+        if cat == 'medium':
+            return True, "Exempt: Medium category"
+        if 'trader' in btype:
+            return True, "Exempt: Trader"
+        return False, ""
+
+    aging_summary = []
+    log_details = []
+    disallow_43b = []
+
+    for party, group in df.groupby("Party"):
+        group = group.sort_values("Date").reset_index(drop=True)
+
+        unmatched_bills = deque()
+        unmatched_advances = deque()
+
+        # Build unmatched invoices and advances using transactions <= cutoff
+        for _, row in group.iterrows():
+            txn_date = row["Date"]
+            if pd.isna(txn_date):
+                continue
+
+            if row["Debit"] > 0 and txn_date <= cutoff_date:
+                amt = row["Debit"]
+                while amt > 0 and unmatched_bills:
+                    bill = unmatched_bills[0]
+                    avail = bill["amount"] - bill["matched"]
+                    to_match = min(avail, amt)
+                    bill["matched"] += to_match
+                    amt -= to_match
+                    if bill["matched"] == bill["amount"]:
+                        unmatched_bills.popleft()
+                if amt > 0:
+                    unmatched_advances.append({"date": txn_date, "amount": amt})
+
+            elif row["Credit"] > 0 and txn_date <= cutoff_date:
+                bill_amt = row["Credit"]
+                while bill_amt > 0 and unmatched_advances:
+                    adv = unmatched_advances[0]
+                    to_match = min(bill_amt, adv["amount"])
+                    bill_amt -= to_match
+                    adv["amount"] -= to_match
+                    if adv["amount"] <= 0:
+                        unmatched_advances.popleft()
+                if bill_amt > 0:
+                    unmatched_bills.append({"date": txn_date, "amount": bill_amt, "matched": 0})
+
+        advance_amount = sum(a["amount"] for a in unmatched_advances)
+
+        buckets = {"0-45": 0.0, "46-60": 0.0, "61-90": 0.0, ">90": 0.0}
+        pending_invoices = []
+
+        for bill in unmatched_bills:
+            unpaid = bill["amount"] - bill["matched"]
+            if unpaid <= 0:
+                continue
+            age = (cutoff_date - bill["date"]).days
+            if age <= 45:
+                bucket = "0-45"
+            elif age <= 60:
+                bucket = "46-60"
+            elif age <= 90:
+                bucket = "61-90"
+            else:
+                bucket = ">90"
+            buckets[bucket] += unpaid
+
+            log_details.append({
+                "Party": party,
+                "Invoice Date": bill["date"],
+                "Invoice Amount": bill["amount"],
+                "Matched Amount": bill["matched"],
+                "Unpaid Amount": unpaid,
+                "Age (in days)": age,
+                "Aging Bucket": bucket,
+                "Remarks": ""
+            })
+
+            pending_invoices.append({
+                "date": bill["date"],
+                "amount": bill["amount"],
+                "remaining": unpaid
+            })
+
+        payments_after_cutoff = []
+        for _, r in group.iterrows():
+            if r["Debit"] > 0 and r["Date"] > cutoff_date:
+                payments_after_cutoff.append({"date": r["Date"], "amount_remaining": r["Debit"]})
+        payments_after_cutoff.sort(key=lambda x: x["date"])
+
+        for inv in pending_invoices:
+            inv["paid_amount_after_cutoff"] = 0.0
+            inv["paid_date_after_cutoff"] = None
+
+        for pay in payments_after_cutoff:
+            if pay["amount_remaining"] <= 0:
+                continue
+            for inv in pending_invoices:
+                if pay["amount_remaining"] <= 0:
+                    break
+                if inv["remaining"] <= 0:
+                    continue
+                alloc = min(inv["remaining"], pay["amount_remaining"])
+                inv["remaining"] -= alloc
+                inv["paid_amount_after_cutoff"] += alloc
+                inv["paid_date_after_cutoff"] = pay["date"]
+                pay["amount_remaining"] -= alloc
+
+        # Build 43B disallowance rows (but incorporate MSME exemptions)
+        for inv in pending_invoices:
+            unpaid_after = inv["remaining"]
+            paid_amt_after = inv.get("paid_amount_after_cutoff", 0.0)
+            paid_date_after = inv.get("paid_date_after_cutoff", None)
+            deadline = inv["date"] + pd.Timedelta(days=45)
+
+            if paid_amt_after >= (inv.get("amount", 0.0)):
+                within_45_days = "Yes" if (paid_date_after is not None and paid_date_after <= deadline) else "No"
+            else:
+                within_45_days = "No"
+
+            # MSME exemption check
+            exempt, reason = is_exempt(party)
+            if exempt:
+                disallowed_flag = "No"
+                within_45_days = "Exempt"
+                paid_amt_report = min(paid_amt_after, inv.get("amount", 0.0))
+            else:
+                disallowed_flag = "No" if within_45_days == "Yes" else "Yes"
+                paid_amt_report = min(paid_amt_after, inv.get("amount", 0.0))
+
+            disallow_43b.append({
+                "Party": party,
+                "Invoice Date": inv["date"],
+                "Invoice Amount": inv.get("amount", 0.0),
+                "Unpaid Amount (after cutoff allocations)": unpaid_after,
+                "Paid Amount (after cutoff)": paid_amt_report,
+                "Paid Date (after cutoff)": paid_date_after,
+                "Within 45 Days": within_45_days,
+                "Disallowed u/s 43B(h)": disallowed_flag,
+                "MSME Exemption Applied": "Yes" if exempt else "No",
+                "Exemption Reason": reason
+            })
+
+        party_summary = {
+            "Party": party,
+            "Total Outstanding": sum(buckets.values()),
+            **buckets,
+            "Advance to Supplier": advance_amount
+        }
+        aging_summary.append(party_summary)
+
+    return pd.DataFrame(aging_summary), pd.DataFrame(log_details), pd.DataFrame(disallow_43b)
+
+# -------------------------
 # MSME template helpers
+# -------------------------
 def make_msme_template(parties_list):
+    # If parties_list provided, prefill Supplier Name col
     rows = []
     for p in parties_list:
         rows.append({
@@ -109,6 +292,10 @@ def make_msme_template(parties_list):
     return df
 
 def to_excel_bytes(df_dict):
+    """
+    df_dict: {sheetname: dataframe}
+    returns bytes of xlsx
+    """
     out = BytesIO()
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         for name, df in df_dict.items():
@@ -116,7 +303,9 @@ def to_excel_bytes(df_dict):
     out.seek(0)
     return out.getvalue()
 
+# -------------------------
 # UI & Session state
+# -------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -147,9 +336,9 @@ else:
 
     st.title("📊 Creditor Aging & 43B(h) — MSME Enhanced")
 
-    # Main area refresh/reset button - just before Step 1 header
+    # Main area refresh/reset button - put this just before Step 1 header
     if st.button("🔄 Refresh/Reset"):
-        for k in ["msme_df", "parsed_data", "unique_parties", "outstanding_parties", "cutoff_date"]:
+        for k in ["msme_df", "parsed_data", "unique_parties"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -174,152 +363,79 @@ else:
         try:
             df_raw = pd.read_excel(uploaded_file, header=None)
             parsed_data = parse_ledger_df(df_raw)
-            st.session_state.parsed_data = parsed_data
             st.success("Ledger parsed successfully.")
             st.subheader("Preview (first 2 rows)")
             st.dataframe(parsed_data.head(2))
             unique_parties = parsed_data['Party'].drop_duplicates().sort_values().tolist()
-            st.session_state.unique_parties = unique_parties
             st.info(f"Found {len(unique_parties)} unique suppliers/parties.")
         except Exception as e:
             st.error(f"Error reading/processing ledger: {e}")
 
-    # Step 2: Select cutoff date and MSME mapping
+    # Step 2: MSME mapping (upload or download template)
     st.header("Step 2 — MSME Mapping")
-    st.markdown(
-        "Select cutoff date and map MSME details for only those suppliers who have a payable balance as of the cutoff date."
-    )
+    st.markdown("You can upload an MSME mapping file (CSV/XLSX) with supplier statuses, or download the template, edit, and re-upload. You can also edit values inline below.")
 
-    # Select cutoff date here (before MSME mapping)
-    if "cutoff_date" not in st.session_state:
-        default_cutoff = datetime(2025, 3, 31)
-    else:
-        default_cutoff = st.session_state.cutoff_date
-    cutoff_date = st.date_input("Select cutoff date", value=default_cutoff)
-    st.session_state.cutoff_date = cutoff_date
-
-    # Only prepare outstanding_parties if ledger is uploaded
-    outstanding_parties = []
-    if (
-        "parsed_data" in st.session_state
-        and st.session_state.parsed_data is not None
-        and cutoff_date is not None
-    ):
-        # Prepare empty MSME map for function call (not used for aging, just for structure)
-        empty_msme_map = pd.DataFrame(
-            columns=[
-                "Supplier Name",
-                "Registered (Yes/No)",
-                "Category (Micro/Small/Medium)",
-                "Business Type (Trader/Manufacturer/Service Provider)",
-            ]
-        )
-        aging_df, _, _ = calculate_creditor_aging_and_43b(
-            st.session_state.parsed_data, pd.to_datetime(cutoff_date), empty_msme_map
-        )
-        outstanding_parties = aging_df[aging_df["Total Outstanding"] > 0]["Party"].tolist()
-        st.session_state.outstanding_parties = outstanding_parties
-
-    # MSME mapping UI
-    st.markdown(
-        "You can upload an MSME mapping file (CSV/XLSX) with supplier statuses, or download the template, edit, and re-upload. You can also edit values inline below. **Only suppliers with payable balance as on cutoff are shown.**"
-    )
-
-    col_a, col_b = st.columns([1, 1])
+    col_a, col_b = st.columns([1,1])
     with col_a:
         st.markdown("**Download sample template**")
-        sample_df = make_msme_template(outstanding_parties[:50])  # preview limit
-        csv_bytes = sample_df.to_csv(index=False).encode("utf-8")
+        sample_df = make_msme_template(unique_parties[:50])  # limit preview to first 50 for template
+        csv_bytes = sample_df.to_csv(index=False).encode('utf-8')
         excel_bytes = to_excel_bytes({"MSME Template": sample_df})
-        st.download_button(
-            "Download template (CSV)",
-            data=csv_bytes,
-            file_name="msme_template.csv",
-            mime="text/csv",
-        )
-        st.download_button(
-            "Download template (Excel)",
-            data=excel_bytes,
-            file_name="msme_template.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        st.download_button("Download template (CSV)", data=csv_bytes, file_name="msme_template.csv", mime="text/csv")
+        st.download_button("Download template (Excel)", data=excel_bytes, file_name="msme_template.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     with col_b:
-        uploaded_msme = st.file_uploader(
-            "Upload MSME mapping (CSV / xlsx) (optional)", type=["csv", "xlsx"]
-        )
+        uploaded_msme = st.file_uploader("Upload MSME mapping (CSV / xlsx) (optional)", type=["csv","xlsx"])
 
     # Load or initialize msme_df in session
     if "msme_df" not in st.session_state:
-        st.session_state.msme_df = make_msme_template(outstanding_parties)
+        st.session_state.msme_df = pd.DataFrame(columns=['Supplier Name','Registered (Yes/No)','Category (Micro/Small/Medium)','Business Type (Trader/Manufacturer/Service Provider)'])
 
     if uploaded_msme is not None:
         try:
-            if uploaded_msme.name.endswith(".csv"):
+            if uploaded_msme.name.endswith('.csv'):
                 msme_df = pd.read_csv(uploaded_msme)
             else:
                 msme_df = pd.read_excel(uploaded_msme)
-            required_cols = [
-                "Supplier Name",
-                "Registered (Yes/No)",
-                "Category (Micro/Small/Medium)",
-                "Business Type (Trader/Manufacturer/Service Provider)",
-            ]
+            # Ensure required columns
+            required_cols = ['Supplier Name','Registered (Yes/No)','Category (Micro/Small/Medium)','Business Type (Trader/Manufacturer/Service Provider)']
             missing = [c for c in required_cols if c not in msme_df.columns]
             if missing:
-                st.error(
-                    f"Uploaded MSME file is missing columns: {missing}. Please use the template."
-                )
+                st.error(f"Uploaded MSME file is missing columns: {missing}. Please use the template.")
             else:
-                msme_df["Supplier Name"] = msme_df["Supplier Name"].astype(str).str.strip()
-                # Filter uploaded mapping to only outstanding_parties
-                msme_df = msme_df[msme_df["Supplier Name"].isin(outstanding_parties)].reset_index(drop=True)
+                # normalize supplier names
+                msme_df['Supplier Name'] = msme_df['Supplier Name'].astype(str).str.strip()
                 st.session_state.msme_df = msme_df.copy()
                 st.success("MSME mapping loaded.")
         except Exception as e:
             st.error(f"Error reading MSME mapping: {e}")
 
-    # Ensure all outstanding_parties are present in msme_df
-    if outstanding_parties and st.session_state.msme_df is not None:
+    # If parsed ledger exists, ensure all parties are present in msme_df (add missing rows)
+    if parsed_data is not None:
         current_msme = st.session_state.msme_df.copy()
-        parties_in_map = (
-            current_msme["Supplier Name"].astype(str).str.strip().str.lower().tolist()
-        )
+        parties_in_map = current_msme['Supplier Name'].astype(str).str.strip().str.lower().tolist()
         added = 0
-        for p in outstanding_parties:
+        for p in unique_parties:
             if str(p).strip().lower() not in parties_in_map:
-                current_msme = pd.concat(
-                    [
-                        current_msme,
-                        pd.DataFrame(
-                            [
-                                {
-                                    "Supplier Name": p,
-                                    "Registered (Yes/No)": "",
-                                    "Category (Micro/Small/Medium)": "",
-                                    "Business Type (Trader/Manufacturer/Service Provider)": "",
-                                }
-                            ]
-                        ),
-                    ],
-                    ignore_index=True,
-                )
+                # append blank row
+                current_msme = pd.concat([current_msme, pd.DataFrame([{
+                    'Supplier Name': p,
+                    'Registered (Yes/No)': '',
+                    'Category (Micro/Small/Medium)': '',
+                    'Business Type (Trader/Manufacturer/Service Provider)': ''
+                }])], ignore_index=True)
                 added += 1
         if added > 0:
             st.session_state.msme_df = current_msme
-            st.info(
-                f"Added {added} suppliers with payable balance to MSME mapping for editing."
-            )
+            st.info(f"Added {added} suppliers to MSME mapping for editing.")
 
-    st.markdown(
-        """
+    # Inline edit using data_editor (available in newer Streamlit)
+    st.markdown("""
 **Edit MSME mapping (inline)** — Edit here.
 Any supplier included below and left blank will be treated as Non MSME registered.
 If you don't know the MSME status of the supplier and want to leave it blank, it will be treated as non-registered MSME.
-"""
-    )
-    edited = st.data_editor(
-        st.session_state.msme_df, num_rows="dynamic", use_container_width=True
-    )
+""")
+    edited = st.data_editor(st.session_state.msme_df, num_rows="dynamic", use_container_width=True)
+    # Save edited back to session
     st.session_state.msme_df = edited.copy()
 
     # Allow user to export the MSME mapping they edited
@@ -329,49 +445,36 @@ If you don't know the MSME status of the supplier and want to leave it blank, it
             "⬇ Download MSME mapping you edited (Excel)",
             data=out_msme_bytes,
             file_name="msme_mapping_used.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     # Step 3: Run processing with MSME exemptions
     st.header("Step 3 — Run Aging & 43B(h) with MSME exemptions")
-    # Use cutoff_date from session (already selected above)
-    if "parsed_data" not in st.session_state or st.session_state.parsed_data is None:
+    cutoff_date = st.date_input("Select cutoff date", value=datetime(2025, 3, 31))
+    if parsed_data is None:
         st.info("Upload a ledger file to enable processing.")
     else:
-        run_col, note_col = st.columns([1, 2])
+        run_col, note_col = st.columns([1,2])
         with run_col:
             if st.button("Run & Download Final Report (Excel)"):
                 with st.spinner("Processing..."):
                     msme_map = st.session_state.msme_df.copy()
-                    aging_df, log_df, df_43b_log = calculate_creditor_aging_and_43b(
-                        st.session_state.parsed_data,
-                        pd.to_datetime(st.session_state.cutoff_date),
-                        msme_map,
-                    )
-                    out_bytes = to_excel_bytes(
-                        {
-                            "Aging Summary": aging_df,
-                            "FIFO Log": log_df,
-                            "43B Disallowance": df_43b_log,
-                            "MSME Mapping Used": msme_map,
-                        }
-                    )
-                    filename = f"aging_43b_msme_{st.session_state.user}_{st.session_state.cutoff_date}.xlsx"
-                    st.download_button(
-                        "⬇ Download Final Report (Excel)",
-                        data=out_bytes,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
+                    aging_df, log_df, df_43b_log = calculate_creditor_aging_and_43b(parsed_data, pd.to_datetime(cutoff_date), msme_map)
+                    out_bytes = to_excel_bytes({
+                        "Aging Summary": aging_df,
+                        "FIFO Log": log_df,
+                        "43B Disallowance": df_43b_log,
+                        "MSME Mapping Used": msme_map
+                    })
+                    filename = f"aging_43b_msme_{st.session_state.user}_{cutoff_date}.xlsx"
+                    st.download_button("⬇ Download Final Report (Excel)", data=out_bytes, file_name=filename, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         with note_col:
-            st.markdown(
-                """
+            st.markdown("""
             **Notes on MSME exemptions applied:**  
             - A supplier marked **Registered = No** is treated as *non-registered* and **exempt** from 43B(h).  
             - A supplier with **Category = Medium** is **exempt**.  
             - A supplier with **Business Type = Trader** is **exempt**.  
             - If a supplier is *not present* in the MSME mapping, they are treated as **not exempt** (so they will be assessed for disallowance) — please edit mapping inline if needed.
-            """
-            )
+            """)
     st.write("---")
     st.markdown("This app processes uploaded files in-memory only.")
