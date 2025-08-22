@@ -329,16 +329,19 @@ if not st.session_state.logged_in:
     st.info("Contact ______ for Login details ")
 else:
     st.sidebar.write(f"Logged in as: **{st.session_state.user}**")
+    # Sidebar logout button
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
 
-    # Add refresh/reset button (not shown on login page)
-    if st.sidebar.button("🔄 Refresh/Reset"):
-        # Clear session for relevant keys, but NOT logged_in or user
+    st.title("📊 Creditor Aging & 43B(h) — MSME Enhanced")
+
+    # Main area refresh/reset button - put this just before Step 1 header
+    if st.button("🔄 Refresh/Reset"):
         for k in ["msme_df", "parsed_data", "unique_parties"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
-
-    st.title("📊 Creditor Aging & 43B(h) — MSME Enhanced")
 
     # Step 1: Upload ledger
     st.header("Step 1 — Upload Creditor Ledger")
@@ -438,7 +441,12 @@ If you don't know the MSME status of the supplier and want to leave it blank, it
     # Allow user to export the MSME mapping they edited
     if not st.session_state.msme_df.empty:
         out_msme_bytes = to_excel_bytes({"MSME Mapping": st.session_state.msme_df})
-        st.download_button("⬇ Download MSME mapping you edited (Excel)", data=out_msme_bytes, file_name="msme_mapping_used.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "⬇ Download MSME mapping you edited (Excel)",
+            data=out_msme_bytes,
+            file_name="msme_mapping_used.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     # Step 3: Run processing with MSME exemptions
     st.header("Step 3 — Run Aging & 43B(h) with MSME exemptions")
