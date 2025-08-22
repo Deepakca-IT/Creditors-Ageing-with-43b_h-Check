@@ -6,7 +6,7 @@ from datetime import datetime
 from io import BytesIO
 from collections import deque
 
-st.set_page_config(page_title="Creditors Ageing + 43B(h) Tool", layout="wide")
+st.set_page_config(page_title="Creditors 43B(h) Tool", layout="wide")
 
 def clear_all():
     for key in [
@@ -178,7 +178,7 @@ def calculate_creditor_aging_and_43b(df: pd.DataFrame, cutoff_date: pd.Timestamp
 
         advance_amount = sum(a["amount"] for a in unmatched_advances)
 
-        buckets = {"0-45": 0.0, "46-60": 0.0, "61-90": 0.0, ">90": 0.0}
+        buckets = {"0-45": 0.0, ">46": 0.0}
         pending_invoices = []
 
         for bill in unmatched_bills:
@@ -188,12 +188,9 @@ def calculate_creditor_aging_and_43b(df: pd.DataFrame, cutoff_date: pd.Timestamp
             age = (cutoff_date - bill["date"]).days
             if age <= 45:
                 bucket = "0-45"
-            elif age <= 60:
-                bucket = "46-60"
-            elif age <= 90:
-                bucket = "61-90"
+           
             else:
-                bucket = ">90"
+                bucket = ">46"
             buckets[bucket] += unpaid
 
             log_details.append({
