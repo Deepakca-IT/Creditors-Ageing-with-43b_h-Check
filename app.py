@@ -7,7 +7,7 @@ from datetime import datetime
 from io import BytesIO
 from collections import deque
 
-st.set_page_config(page_title="Creditors Ageing + 43B(h) Tool", layout="wide")
+st.set_page_config(page_title="Creditors 43B(h) Tool", layout="wide")
 
 # -------------------------
 # Authentication (reuse your method: st.secrets or users.json)
@@ -310,7 +310,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🔐 Login — Aging + 43B(h) Tool (with MSME)")
+    st.title("🔐 Login —43B(h) Tool (with MSME)")
     col1, col2 = st.columns([2,1])
     with col1:
         username = st.text_input("Username")
@@ -334,7 +334,7 @@ else:
         st.session_state.logged_in = False
         st.rerun()
 
-    st.title("📊 Creditor Aging & 43B(h) — MSME Enhanced")
+    st.title("📊 Creditor 43B(h) — MSME")
 
     # Main area refresh/reset button - put this just before Step 1 header
     if st.button("🔄 Refresh/Reset"):
