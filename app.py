@@ -426,7 +426,7 @@ else:
             st.info(f"Added {added} suppliers to MSME mapping for editing.")
 
     # Inline edit using data_editor (available in newer Streamlit)
-    st.markdown("**Edit MSME mapping (inline)** — Edit here.Any supplier included below and left blank will be treated as Non MSME registered.If you dnt know the MSME status of the supplier and want[...]
+    st.markdown("**Edit MSME mapping (inline)** — Edit here.Any supplier included below and left blank will be treated as Non MSME registered.If you dnt know the MSME status of the supplier and want")
     edited = st.data_editor(st.session_state.msme_df, num_rows="dynamic", use_container_width=True)
     # Save edited back to session
     st.session_state.msme_df = edited.copy()
