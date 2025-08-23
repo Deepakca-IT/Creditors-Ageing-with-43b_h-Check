@@ -19,61 +19,51 @@ def load_users_from_file(fname="users.json"):
     except FileNotFoundError:
         return {}
 
-def normalize_users_from_secrets():
-    out = {}
-    raw = st.secrets.get("users", {}) if hasattr(st, "secrets") else {}
+def normalize_users(st_secrets):
+    users_out = {}
+    raw = st_secrets.get("users", {}) if st_secrets else {}
     for k, v in raw.items():
         if isinstance(v, dict):
-            pwd = v.get("password")
-            expiry = v.get("expiry")
-        else:  # allow legacy format: username = "password"
-            pwd = v
-            expiry = None
-        out[k.strip().lower()] = {
-            "password": str(pwd) if pwd is not None else "",
-            "expiry": str(expiry) if expiry else None
-        }
-    return out
+            users_out[k] = {"password": v.get("password"), "expiry": v.get("expiry")}
+        else:
+            users_out[k] = {"password": v, "expiry": None}
+    return users_out
 
-USERS = normalize_users_from_secrets()
-
-def verify_password(stored: str, supplied: str) -> bool:
-    """Supports plain text OR bcrypt hashes beginning with $2.."""
+def check_login(username: str, password: str, users_dict: dict):
+    if username not in users_dict:
+        return False, "Invalid username or password"
+    stored = users_dict[username].get("password")
+    if not stored:
+        return False, "No password set for this user"
     try:
-        import bcrypt
-        if stored.startswith("$2"):  # looks like a bcrypt hash
-            return bcrypt.checkpw(supplied.encode("utf-8"), stored.encode("utf-8"))
-    except Exception:
-        # bcrypt not installed or other error; fall back to plain compare
-        pass
-    return stored == supplied
+        if isinstance(stored, str) and stored.startswith("$2"):
+            if bcrypt.checkpw(password.encode(), stored.encode()):
+                expiry = users_dict[username].get("expiry")
+                if expiry:
+                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    if exp_date < datetime.today().date():
+                        return False, "Subscription expired"
+                return True, None
+            else:
+                return False, "Invalid username or password"
+        else:
+            if password == stored:
+                expiry = users_dict[username].get("expiry")
+                if expiry:
+                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    if exp_date < datetime.today().date():
+                        return False, "Subscription expired"
+                return True, None
+            else:
+                return False, "Invalid username or password"
+    except Exception as e:
+        return False, f"Auth error: {e}"
 
-def is_expired(expiry_str: str | None) -> bool:
-    if not expiry_str:
-        return False
-    try:
-        d = datetime.strptime(expiry_str, "%Y-%m-%d").date()
-        return datetime.now().date() > d
-    except Exception:
-        st.warning(f"Invalid expiry format `{expiry_str}`; expected YYYY-MM-DD")
-        return False
-
-st.title("Login")
-
-username = st.text_input("Username")
-password = st.text_input("Password", type="password")
-
-if st.button("Login"):
-    key = username.strip().lower()
-    user = USERS.get(key)
-    if not user:
-        st.error("Invalid username or password")  # user not found
-    elif is_expired(user["expiry"]):
-        st.error("Account expired")
-    elif not verify_password(user["password"], password):
-        st.error("Invalid username or password")  # bad password
-    else:
-        st.success(f"Welcome {username}!")
+# load users
+if "users" in st.secrets:
+    users = normalize_users(st.secrets)
+else:
+    users = load_users_from_file("users.json")
 
 # -------------------------
 # Ledger parsing & processing (existing logic)
