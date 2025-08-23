@@ -20,85 +20,44 @@ def load_users_from_file(fname="users.json"):
         return {}
 
 def normalize_users(st_secrets):
+    users_out = {}
+    raw = st_secrets.get("users", {}) if st_secrets else {}
+    for k, v in raw.items():
+        if isinstance(v, dict):
+            users_out[k] = {"password": v.get("password"), "expiry": v.get("expiry")}
+        else:
+            users_out[k] = {"password": v, "expiry": None}
+    return users_out
 
-
-users_db = load_users()
-
-
-# -------------------------
-# Authentication
-# -------------------------
-def check_user(username, password):
-user = users_db.get(username)
-if not user:
-return False, "Invalid username"
-if 'expiry' in user and user['expiry']:
-exp_date = datetime.strptime(user['expiry'], "%Y-%m-%d")
-if datetime.now() > exp_date:
-return False, "Account expired"
-if bcrypt.checkpw(password.encode(), user['password'].encode()) if user['password'].startswith('$2b$') else password == user['password']:
-return True, "Success"
-return False, "Invalid password"
-
-
-def signup_user(username, password, email, mobile, expiry=None):
-    if not mobile:
-    return False, "Mobile number is mandatory"
-    if username in users_db:
-    return False, "Username already exists"
-    users_db[username] = {
-    "password": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
-    "email": email,
-    "mobile": mobile,
-    "expiry": expiry
-    }
-    with open('users.json', 'w') as f:
-    json.dump(users_db, f, indent=2)
-    return True, "User registered successfully"
-    
-    
-    # -------------------------
-    # UI Pages
-    # -------------------------
-    page = st.sidebar.selectbox("Select Page", ["Login", "Signup", "Admin"])
-    
-    
-    if page == "Login":
-    st.title("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-    valid, msg = check_user(username, password)
-    st.info(msg)
-    if valid:
-    st.success(f"Welcome {username}")
-    
-    
-    elif page == "Signup":
-    st.title("Signup")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    email = st.text_input("Email")
-    mobile = st.text_input("Mobile Number")
-    expiry = st.date_input("Expiry Date", value=None)
-    if st.button("Signup"):
-    success, msg = signup_user(username, password, email, mobile, expiry.strftime('%Y-%m-%d') if expiry else None)
-    st.info(msg)
-    
-    
-    elif page == "Admin":
-    st.title("Admin Panel")
-    admin_user = st.text_input("Admin Username")
-    admin_pass = st.text_input("Admin Password", type="password")
-    if st.button("Login as Admin"):
-    valid, msg = check_user(admin_user, admin_pass)
-    if valid and admin_user == "admin":
-    st.success("Welcome Admin")
-    st.write("Registered Users:")
-    df = pd.DataFrame(users_db).T
-    st.dataframe(df)
-    else:
-    st.error("Invalid admin credentials")
+def check_login(username: str, password: str, users_dict: dict):
+    if username not in users_dict:
+        return False, "Invalid username or password"
+    stored = users_dict[username].get("password")
+    if not stored:
+        return False, "No password set for this user"
+    try:
+        if isinstance(stored, str) and stored.startswith("$2"):
+            if bcrypt.checkpw(password.encode(), stored.encode()):
+                expiry = users_dict[username].get("expiry")
+                if expiry:
+                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    if exp_date < datetime.today().date():
+                        return False, "Subscription expired"
+                return True, None
+            else:
+                return False, "Invalid username or password"
+        else:
+            if password == stored:
+                expiry = users_dict[username].get("expiry")
+                if expiry:
+                    exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+                    if exp_date < datetime.today().date():
+                        return False, "Subscription expired"
+                return True, None
+            else:
+                return False, "Invalid username or password"
+    except Exception as e:
+        return False, f"Auth error: {e}"
 
 # load users
 if "users" in st.secrets:
