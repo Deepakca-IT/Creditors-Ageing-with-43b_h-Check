@@ -432,7 +432,7 @@ else:
     st.markdown("""
 **Edit MSME mapping (inline)** — Edit here.
 Any supplier included below and left blank will be treated as Non MSME registered.
-If you don't know the MSME status of the supplier and want to leave it blank, it will be treated as non-registered MSME.
+If you don't know the MSME status of the supplier and want to check ,as if they would fall under eligible category ,delete them from the below list, it will be treated as registered MSME.
 """)
     edited = st.data_editor(st.session_state.msme_df, num_rows="dynamic", use_container_width=True)
     # Save edited back to session
